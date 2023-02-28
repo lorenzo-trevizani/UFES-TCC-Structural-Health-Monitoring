@@ -1,6 +1,6 @@
 import re
 
-def getDamageScenario(path) :
+def getDamageScenarioLabel(path) :
     """
     Take path variable .txt and return int associate in the end of file name.
     Exemple:
