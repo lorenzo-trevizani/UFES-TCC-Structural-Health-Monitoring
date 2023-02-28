@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-import getDamageScenario
+from getDamageScenario import *
 
 def initDatabase(path) :
     """
@@ -34,7 +34,7 @@ def initDatabase(path) :
         qty_row = len(data[0]);
 
         #Import scenario for damage
-        scenario_number = getDamageScenario.getDamageScenario(path[i]);
+        scenario_number = getDamageScenario(path[i]);
         scenario_array = np.full((qty_row), scenario_number).tolist();
 
         #Merge scenario number into dataframe
