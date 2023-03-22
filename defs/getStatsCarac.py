@@ -18,5 +18,3 @@ def getStatisticalCaracteristics(original_df,sensor_column_id) :
 
     # Reset the index of the grouped_values dataframe
     return grouped_values;
-
-
