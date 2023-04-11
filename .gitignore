@@ -131,3 +131,9 @@ dmypy.json
 # Database Files
 
 database_raw/
+
+# VSCode Workspace
+*.code-workspace
+
+# Notes
+notes.txt

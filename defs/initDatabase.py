@@ -4,7 +4,7 @@ from . import getDamageScenario
 
 def initDatabase(path) :
     """
-    Take list of paths to loop through and return the dataframe unified and merge with damage scenario
+    Take [list] of paths to loop through and return the dataframe unified and merge with damage scenario
     """
     ## Get column names from database
     data = pd.read_csv(path[0], skiprows=10, sep='\t', header=None, dtype='unicode');
@@ -14,11 +14,12 @@ def initDatabase(path) :
     qty_col = len(data.columns);
 
     #Create array for column's names
-    column_label_list = [];
+    column_label_list = [
+        'Time'
+    ];
 
-    for j in range(qty_col):
-        column_label = dataframe_initial[j][0];
-        column_label_list.append(column_label);
+    for j in range(qty_col - 1):
+        column_label_list.append('S'+ str(j+1))
 
     column_label_list.append('Scenario');
 
