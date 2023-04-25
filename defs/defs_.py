@@ -82,6 +82,11 @@ def getStatisticalCaracteristics(original_df,sensor_column_id) :
     grouped_values['kurtosis'] = sensor_df.groupby(np.arange(len(original_df)) // 50).apply(lambda x: pd.Series.kurtosis(x))
 
     # Reset the index of the grouped_values dataframe
+    new_columns = []
+    for i in range(len(grouped_values.columns)):
+        new_columns.append(grouped_values.columns[i] + '_' + sensor_column_id)
+    grouped_values.columns = new_columns
+
     return grouped_values;
 
 def createDatabase(path):
@@ -127,23 +132,27 @@ def prepareDatabase(path) :
     df_first_scenario = df_first_scenario.astype(float);
 
     df_first_sensor = getStatisticalCaracteristics(df_first_scenario,column_label[0]);
-    df_first_sensor['Sensor'] = column_label[0];
-    df_first_sensor['Scenario'] = df_first_scenario['Scenario'][1];
+
+    for i in range(len(column_label)-1):
+        df_first_scenario_sensors = getStatisticalCaracteristics(df_first_scenario,column_label[i+1]);
+        df_first_sensor = pd.concat([df_first_sensor,df_first_scenario_sensors],axis=1)
+
+    df_first_sensor['Scenario'] = getDamageScenarioLabel(path[0]);
 
     df_final = df_first_sensor
 
-    for i in range(len(path)):
-        df_scenario = createDatabase(path[i]);
+    for i in range(len(path)-1):
+        df_scenario = createDatabase(path[i+1]);
         df_scenario = df_scenario.astype(float);
 
-        for j in range(len(column_label)):
-            if (i == 0 and j == 0):
-                continue;
-            
-            df_sensor = getStatisticalCaracteristics(df_scenario,column_label[j]);
-            df_sensor['Sensor'] = column_label[j];
-            df_sensor['Scenario'] = df_scenario['Scenario'][1];
+        df_scenario_first_sensor = getStatisticalCaracteristics(df_scenario,column_label[0]);
 
-            df_final = pd.concat([df_final,df_sensor], axis=0, ignore_index=True, sort=False);
+        for j in range(len(column_label)-1):
+            df_sensor = getStatisticalCaracteristics(df_scenario,column_label[j+1]);
+            df_scenario_first_sensor = pd.concat([df_scenario_first_sensor,df_sensor],axis=1)
+
+        df_scenario_first_sensor['Scenario'] = getDamageScenarioLabel(path[i+1]);
+
+        df_final = pd.concat([df_final,df_scenario_first_sensor], axis=0, ignore_index=True, sort=False);
     
     return df_final
