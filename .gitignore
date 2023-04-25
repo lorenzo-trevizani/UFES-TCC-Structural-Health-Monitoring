@@ -132,6 +132,9 @@ dmypy.json
 
 database_raw/
 
+dataframe_final
+dataframe_simples
+
 # VSCode Workspace
 *.code-workspace
 
