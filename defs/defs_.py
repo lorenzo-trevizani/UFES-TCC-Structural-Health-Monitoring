@@ -156,3 +156,23 @@ def prepareDatabase(path) :
         df_final = pd.concat([df_final,df_scenario_first_sensor], axis=0, ignore_index=True, sort=False);
     
     return df_final
+
+def createDatabaseSingleSensor(df_, sensor) :
+    """
+    Take dataframe from prepareDatabase and a sensor(int) to return the sensor part of the dataframe with damaged or not label
+    """
+
+    #Filter dataframe to get only columns related to the sensor
+    regex = r'^(Scenario|.*_S' + str(sensor) +')$'
+    df_filtered = df_.filter(regex=regex)
+
+    #Get which sensor is being used
+    # expression_used = r'_S(\d+)$'
+    # sensor_focus = re.search(expression_used, df_quick_test.columns[1])
+
+    #Transform scenario column into damaged or not column based on the sensor on focus
+    transform = lambda x: 1 if x == str(sensor) else 0
+    df_filtered['Scenario'] = df_filtered['Scenario'].apply(transform)
+    df_filtered = df_filtered.rename(columns={'Scenario': 'damaged'})
+
+    return df_filtered
