@@ -1,6 +1,31 @@
+import glob
+import matplotlib.pyplot as plt
 import pandas as pd
+from numpy.fft import fft, ifft
 import numpy as np
+import scipy
+import seaborn as sns
 import re
+from tqdm.notebook import tqdm
+import math
+
+#IMPORTING FUNCTIONS FOR CLASSIFIERS
+from sklearn.model_selection import cross_val_score, train_test_split, KFold, StratifiedShuffleSplit, TimeSeriesSplit, RepeatedKFold
+from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import LabelBinarizer
+from sklearn.preprocessing import LabelEncoder
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import ExtraTreesClassifier
+
+#IMPORTING FUNCTIONS FOR CLASSIFIERS METRICS
+from sklearn.metrics import confusion_matrix
+from sklearn.metrics import classification_report
+from sklearn.metrics import ConfusionMatrixDisplay
+from sklearn.metrics import accuracy_score
+
+#OPTMIZE PARAMETHERS
+import optuna
+
 
 def initDatabase(path) :
     """
@@ -67,21 +92,87 @@ def getDamageScenarioLabel(path) :
 
     return scenario_number[0];
 
-def getStatisticalCaracteristics(original_df,sensor_column_id) :
+def getStatisticalCaracteristics(original_df, sensor_column_id, qty_group = 1024, typeof = 'both') :
     """
     Take dataframe and Sensor of choice ('S1') and return the calculated statistical characteristics for group of 50 values
+    typeof variable is string that needs to be either 'freq', 'time' or 'both'. 'both' is default
     """
+
     # Sensor column in dataframe 
-    sensor_df = original_df[sensor_column_id]
+    timebased_df = original_df[['Time',str(sensor_column_id)]];
+    
+    # Sensor column in dataframe 
+    variable_group = int(qty_group);
 
-    # Group the values in S1 column by 50 and calculate statistical characteristics
-    grouped_values = sensor_df.groupby(np.arange(len(original_df)) // 50).agg(['mean', 'std', 'median', 'skew'])
+    # Columns for freq database
+    # freq_columns = ['s_max','s_sum','s_mean','s_std','psd_max','psd_sum','psd_mean','f*s_mean','f*s_max','f*s_sum','high_freq','low_freq'];
+    freq_columns = ['s_max','psd_mean','high_freq','low_freq'];
+    # Columns for timebased database
+    # time_columns = ['mean', 'std', 'median', 'skew', 'amp_max_min', 'kurtosis'];
+    time_columns = ['mean', 'median', 'skew', 'amp_max_min', 'kurtosis'];
 
-    # Calculate the root mean square and the difference between max and min for each group
-    grouped_values['amp_max_min'] = sensor_df.groupby(np.arange(len(original_df)) // 50).apply(lambda x: x.max() - x.min())
-    grouped_values['kurtosis'] = sensor_df.groupby(np.arange(len(original_df)) // 50).apply(lambda x: pd.Series.kurtosis(x))
+    # Creating heading for columns
+    if (typeof == 'both'):
+        head_columns = freq_columns + time_columns;
+    elif (typeof == 'freq'):
+        head_columns = freq_columns;
+    else:
+        head_columns = time_columns;
+    
+    # Heading for columns
+    grouped_values = pd.DataFrame(columns=head_columns);
+    
+    for j in range(int(math.floor(len(timebased_df)/variable_group))) :
 
-    # Reset the index of the grouped_values dataframe
+        df_iteration = timebased_df[j*variable_group:(j+1)*variable_group]
+
+        if (typeof == 'both' or typeof == 'freq') :
+            # Creating variables for freq input
+            ##Getting passo from second time - first time
+            passo = round((df_iteration['Time'][(j*variable_group)+1] - df_iteration['Time'][j*variable_group]),8)
+            f_new, s_new, n_new, psd_new = df2fft(df_iteration,passo);
+
+            ## NÃO MECHER NA ORDEM, DEVEM SER IGUAL A COLUNAS DO grouped_values
+            freq_features = [];
+            freq_features.append(s_new.max());
+            # freq_features.append(s_new.sum());
+            # freq_features.append(s_new.mean());
+            # freq_features.append(s_new.std());
+            # freq_features.append(psd_new.max());
+            # freq_features.append(psd_new.sum());
+            freq_features.append(psd_new.mean());
+            # freq_features.append((f_new*s_new).mean());
+            # freq_features.append((f_new*s_new).max());
+            # freq_features.append((f_new*s_new).sum());
+            freq_features.append(f_new[np.argmax(s_new)]);
+            freq_features.append(1/(f_new[np.argmax(s_new)]));
+        
+        if (typeof == 'both' or typeof == 'time') :
+            sensor_df = df_iteration[str(sensor_column_id)];
+
+            ## NÃO MECHER NA ORDEM, DEVEM SER IGUAL A COLUNAS DO grouped_values
+            time_features = [];
+            time_features.append(sensor_df.mean());
+            # time_features.append(sensor_df.std());
+            time_features.append(sensor_df.median());
+            time_features.append(sensor_df.skew());
+            time_features.append(sensor_df.max() - sensor_df.min());
+            time_features.append(pd.Series.kurtosis(sensor_df));
+    
+        # Creating new row
+        if (typeof == 'both'):
+            new_row = freq_features + time_features;
+        elif (typeof == 'freq'):
+            new_row = freq_features;
+        else:
+            new_row = time_features;
+        
+        # Creating 'array_features' df with new row data
+        array_features = pd.DataFrame([new_row], columns=grouped_values.columns);
+
+        # Concat 'array_features' df in grouped_values
+        grouped_values = pd.concat([grouped_values, array_features], ignore_index=True);
+    
     new_columns = []
     for i in range(len(grouped_values.columns)):
         new_columns.append(grouped_values.columns[i] + '_' + sensor_column_id)
@@ -118,7 +209,7 @@ def createDatabase(path):
     dataframe_initial.columns = column_label_list;
     return dataframe_initial
 
-def prepareDatabase(path) :
+def prepareDatabase(path,number_group = 1024, typeof = 'both') :
     """
     Take [list] of paths to loop through and return the statistical caracteristics in a dataframe
     """
@@ -131,10 +222,10 @@ def prepareDatabase(path) :
     df_first_scenario = createDatabase(path[0]);
     df_first_scenario = df_first_scenario.astype(float);
 
-    df_first_sensor = getStatisticalCaracteristics(df_first_scenario,column_label[0]);
+    df_first_sensor = getStatisticalCaracteristics(df_first_scenario,column_label[0],number_group, typeof);
 
     for i in range(len(column_label)-1):
-        df_first_scenario_sensors = getStatisticalCaracteristics(df_first_scenario,column_label[i+1]);
+        df_first_scenario_sensors = getStatisticalCaracteristics(df_first_scenario,column_label[i+1],number_group, typeof);
         df_first_sensor = pd.concat([df_first_sensor,df_first_scenario_sensors],axis=1)
 
     df_first_sensor['Scenario'] = getDamageScenarioLabel(path[0]);
@@ -145,10 +236,10 @@ def prepareDatabase(path) :
         df_scenario = createDatabase(path[i+1]);
         df_scenario = df_scenario.astype(float);
 
-        df_scenario_first_sensor = getStatisticalCaracteristics(df_scenario,column_label[0]);
+        df_scenario_first_sensor = getStatisticalCaracteristics(df_scenario,column_label[0],number_group, typeof);
 
         for j in range(len(column_label)-1):
-            df_sensor = getStatisticalCaracteristics(df_scenario,column_label[j+1]);
+            df_sensor = getStatisticalCaracteristics(df_scenario,column_label[j+1],number_group, typeof);
             df_scenario_first_sensor = pd.concat([df_scenario_first_sensor,df_sensor],axis=1)
 
         df_scenario_first_sensor['Scenario'] = getDamageScenarioLabel(path[i+1]);
@@ -161,18 +252,125 @@ def createDatabaseSingleSensor(df_, sensor) :
     """
     Take dataframe from prepareDatabase and a sensor(int) to return the sensor part of the dataframe with damaged or not label
     """
+    pd.set_option('mode.chained_assignment', None);
 
     #Filter dataframe to get only columns related to the sensor
-    regex = r'^(Scenario|.*_S' + str(sensor) +')$'
-    df_filtered = df_.filter(regex=regex)
-
-    #Get which sensor is being used
-    # expression_used = r'_S(\d+)$'
-    # sensor_focus = re.search(expression_used, df_quick_test.columns[1])
+    regex = r'^(Scenario|.*_S' + str(sensor) +')$';
+    df_filtered = df_.filter(regex=regex);
 
     #Transform scenario column into damaged or not column based on the sensor on focus
-    transform = lambda x: 1 if x == str(sensor) else 0
-    df_filtered['Scenario'] = df_filtered['Scenario'].apply(transform)
-    df_filtered = df_filtered.rename(columns={'Scenario': 'damaged'})
-
+    transform = lambda x: 1 if x == str(sensor) else 0;
+    df_filtered['Scenario'] = df_filtered['Scenario'].apply(transform);
+    df_filtered = df_filtered.rename(columns={'Scenario': 'damaged'});
     return df_filtered
+
+def probabilityOfDamage(predition) :
+    """
+    Take y_pred from rf and return PoD
+    """
+    j = 0;
+    for i in range(len(predition)) :
+        if predition[i] == 1 :
+            j = j + 1;
+
+    pod = j/len(predition);
+    return pod
+
+def prepareModel(df_new_final) :
+    """
+    Take df_ and return train,test,scaled
+    """
+
+    # Start random forest Model
+    df_rf = df_new_final;
+
+    # Setting target variable
+    y = df_rf['damaged'];
+
+    # Setting other variables
+    X = df_rf.drop(columns=['damaged']);
+    X = X.astype(float);
+
+    # Segregate database for test and train
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=0, shuffle=True) 
+
+    # Scaler database
+    std_scaler = StandardScaler()
+    X_scaled_train = pd.DataFrame(std_scaler.fit_transform(X_train), columns=X_train.columns, index=X_train.index)
+    X_scaled_test = pd.DataFrame(std_scaler.transform(X_test),columns=X_train.columns,index=X_test.index)
+
+    return X_scaled_train, X_scaled_test, y_train, y_test 
+
+def createRFModels(df_rf, qty_sensor=30) :
+    """
+    Take df_rf and return dataframe with rf_models
+    """
+
+    rf_models = pd.DataFrame(columns=['Sensor', 'rf_model', 'accuracy']);
+
+    for i in tqdm(range(qty_sensor)) :
+        dataframe_sensor = createDatabaseSingleSensor(df_rf,i+1);
+        X_scaled_train, X_scaled_test, y_train, y_test = prepareModel(dataframe_sensor);
+
+        ### DEFAULT PARAMETHERS ON FULL DATAFRAME
+        rf = RandomForestClassifier(n_estimators=100);
+        rf.fit(X_scaled_train,y_train);
+        y_pred = rf.predict(X_scaled_test);
+        accuracy_ = accuracy_score(y_test, y_pred);
+
+        d = {'Sensor': [i+1], 'rf_model': [rf], 'accuracy': [accuracy_]};
+        appended_file = pd.DataFrame(data=d);
+
+        rf_models = pd.concat([rf_models, appended_file],axis=0);
+        
+    return rf_models
+
+def createScaledDataframeScenario(df_to_scale, analysed_scenario_input: int) :
+    """
+    Take df with all features from all sensors and sensor intend to return dataframe with scaled df
+    """
+    
+    df_scaled = df_to_scale;
+    analysed_scenario = analysed_scenario_input;
+    # CREATE DATAFRAME WITH 2 PARTS OF SCENARIO received, 1 PARTS OF SCENARIO 0 AND 1 PARTS OF ALL OTHER SCENARIOS    
+    # CREATE DATAFRAME OF SCENARIO 1
+    df_damaged = df_scaled.loc[df_scaled['Scenario'] == analysed_scenario];
+    n_damaged = len(df_damaged);
+
+    # CREATE DATAFRAME OF SCENARIO 0
+    df_undamaged = df_scaled.loc[df_scaled['Scenario'] == '0'];
+    df_undamaged = df_undamaged.sample(n=round(n_damaged/2));
+    n_undamaged = len(df_undamaged);
+
+    # CREATE DATAFRAME OF ALL SCENARIOS
+    df_random_scenarios = df_scaled.loc[df_scaled['Scenario'] != '0'];
+    df_random_scenarios = df_random_scenarios.loc[df_random_scenarios['Scenario'] != str(analysed_scenario)];
+    df_random_scenarios = df_random_scenarios.sample(n=round(n_undamaged));
+
+    df_ready = pd.concat([df_damaged, df_undamaged],axis=0);
+    df_ready = pd.concat([df_ready, df_random_scenarios],axis=0);
+
+    df_ready = createDatabaseSingleSensor(df_ready, analysed_scenario);
+    df_ready = df_ready.reset_index().drop(columns=['index']);
+    return df_ready
+
+def df2fft(df_fft,passo_):
+    '''
+    Função para realizar o FFT.
+    Retorna a frequência, spectro, número de observaçoes e o psd
+    '''
+    n_=len(df_fft)
+
+    fft_calculo=np.fft.fft(df_fft)
+    freq=np.fft.fftfreq(n_,d=passo_)
+    mascara=freq>0
+
+    fft_abs=2.0*np.abs(fft_calculo/n_)
+    psd_calculo=2*(np.abs(fft_calculo/n_)**2)
+
+    s_=fft_abs[mascara] # spectro
+    f_=freq[mascara]    # frequencia
+    psd_=psd_calculo[mascara]
+    # s[0]=s[0]/2
+
+    return f_, s_, n_, psd_
