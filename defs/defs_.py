@@ -9,6 +9,9 @@ import re
 from tqdm.notebook import tqdm
 import math
 
+#IMPORTING FUNCTIONS FOR FEATURE EXTRACTION
+import sklearn.linear_model as LinearModel
+
 #IMPORTING FUNCTIONS FOR CLASSIFIERS
 from sklearn.model_selection import cross_val_score, train_test_split, KFold, StratifiedShuffleSplit, TimeSeriesSplit, RepeatedKFold
 from sklearn.preprocessing import StandardScaler
@@ -100,6 +103,10 @@ def getStatisticalCaracteristics(original_df, sensor_column_id, qty_group = 1024
 
     # Sensor column in dataframe 
     timebased_df = original_df[['Time',str(sensor_column_id)]];
+    # [index,    'Time',      'S1'  ]
+    # [  0,     0.000000,   0.004954]
+    # [ ...,       ...,        ...  ]
+    # [ 262k,   255.9999,  -0.211089]
     
     # Sensor column in dataframe 
     variable_group = int(qty_group);
@@ -124,7 +131,11 @@ def getStatisticalCaracteristics(original_df, sensor_column_id, qty_group = 1024
     
     for j in range(int(math.floor(len(timebased_df)/variable_group))) :
 
-        df_iteration = timebased_df[j*variable_group:(j+1)*variable_group]
+        df_iteration = timebased_df[j*variable_group:(j+1)*variable_group];
+        # [index,    'Time',      'S1'  ]
+        # [  0,     0.000000,   0.004954]
+        # [ ...,       ...,        ...  ]
+        # [ 1023,   0.999023,   0.019900]
 
         if (typeof == 'both' or typeof == 'freq') :
             # Creating variables for freq input
@@ -334,7 +345,7 @@ def createScaledDataframeScenario(df_to_scale, analysed_scenario_input: int) :
     analysed_scenario = analysed_scenario_input;
     # CREATE DATAFRAME WITH 2 PARTS OF SCENARIO received, 1 PARTS OF SCENARIO 0 AND 1 PARTS OF ALL OTHER SCENARIOS    
     # CREATE DATAFRAME OF SCENARIO 1
-    df_damaged = df_scaled.loc[df_scaled['Scenario'] == analysed_scenario];
+    df_damaged = df_scaled.loc[df_scaled['Scenario'] == str(analysed_scenario)];
     n_damaged = len(df_damaged);
 
     # CREATE DATAFRAME OF SCENARIO 0
@@ -374,3 +385,106 @@ def df2fft(df_fft,passo_):
     # s[0]=s[0]/2
 
     return f_, s_, n_, psd_
+
+def ar_model(x,n_coef):
+    N_training = len(x) 
+    x_train = np.zeros((int(N_training - n_coef),n_coef))
+    y_train = np.zeros((int(N_training)- n_coef,))
+    count = 0
+    for i in range(n_coef, N_training):
+        x_train[count,:] = x[i - n_coef:i]
+        y_train[count,] = x[i]
+        count = count + 1
+
+    linear_model = LinearModel.Ridge(alpha=1e-6).fit(x_train, y_train)  
+    return(linear_model.coef_)
+
+def getRegressionCaracteristics(original_df, sensor_column_id, qty_group=1024, qty_coef=3):
+    """
+    Take dataframe and Sensor of choice ('S1') and return the calculated statistical characteristics for group of 50 values typeof variable is string that needs to be either 'freq', 'time' or 'both'. 'both' is default
+    """
+
+    # Sensor column in dataframe 
+    timebased_df = original_df[['Time',str(sensor_column_id)]];
+    # [index,    'Time',      'S1'  ]
+    # [  0,     0.000000,   0.004954]
+    # [ ...,       ...,        ...  ]
+    # [ 262k,   255.9999,  -0.211089]
+    df_sensor_it = timebased_df.drop(columns=['Time'])
+
+    # Sensor column in dataframe 
+    variable_group = int(qty_group);
+
+    #formando head labels
+    head_columns = [];
+    for i in range(qty_coef):
+        coeff = "coeff_" + str(i);
+        head_columns.append(coeff);    
+    
+    # Heading for columns
+    grouped_values = pd.DataFrame(columns=head_columns);
+
+    for j in range(int(math.floor(len(df_sensor_it)/variable_group))) :
+
+        df_iteration = df_sensor_it[j*variable_group:(j+1)*variable_group];
+        # [index,    'Time',      'S1'  ]
+        # [  0,     0.000000,   0.004954]
+        # [ ...,       ...,        ...  ]
+        # [ 1023,   0.999023,   0.019900]
+
+        df_iteration = df_iteration[str(sensor_column_id)];
+
+        # Creating new row
+        new_row = ar_model(list(df_iteration),int(qty_coef));
+        
+        # Creating 'array_features' df with new row data
+        array_features = pd.DataFrame([new_row], columns=grouped_values.columns);
+
+        # Concat 'array_features' df in grouped_values
+        grouped_values = pd.concat([grouped_values, array_features], ignore_index=True);
+    
+    new_columns = [];
+    for i in range(len(grouped_values.columns)):
+        new_columns.append(grouped_values.columns[i] + '_' + sensor_column_id);
+    grouped_values.columns = new_columns;
+
+    return grouped_values;
+
+def prepareRegressionDatabase(path,number_group = 1024, qty_coef=3) :
+    """
+    Take [list] of paths to loop through and return the statistical caracteristics in a dataframe
+    """
+
+    column_label = [];
+    for k in range(30):
+        column_label.append('S'+ str(k+1))
+
+    ## First to concatenated Dataframe
+    df_first_scenario = createDatabase(path[0]);
+    df_first_scenario = df_first_scenario.astype(float);
+
+    df_first_sensor = getRegressionCaracteristics(df_first_scenario,column_label[0],qty_group=number_group, qty_coef=qty_coef);
+
+    for i in range(len(column_label)-1):
+        df_first_scenario_sensors = getRegressionCaracteristics(df_first_scenario,column_label[i+1],qty_group=number_group, qty_coef=qty_coef);
+        df_first_sensor = pd.concat([df_first_sensor,df_first_scenario_sensors],axis=1)
+
+    df_first_sensor['Scenario'] = getDamageScenarioLabel(path[0]);
+
+    df_final = df_first_sensor
+
+    for i in range(len(path)-1):
+        df_scenario = createDatabase(path[i+1]);
+        df_scenario = df_scenario.astype(float);
+
+        df_scenario_first_sensor = getRegressionCaracteristics(df_scenario,column_label[0],qty_group=number_group, qty_coef=qty_coef);
+
+        for j in range(len(column_label)-1):
+            df_sensor = getRegressionCaracteristics(df_scenario,column_label[j+1],qty_group=number_group, qty_coef=qty_coef);
+            df_scenario_first_sensor = pd.concat([df_scenario_first_sensor,df_sensor],axis=1)
+
+        df_scenario_first_sensor['Scenario'] = getDamageScenarioLabel(path[i+1]);
+
+        df_final = pd.concat([df_final,df_scenario_first_sensor], axis=0, ignore_index=True, sort=False);
+    
+    return df_final
