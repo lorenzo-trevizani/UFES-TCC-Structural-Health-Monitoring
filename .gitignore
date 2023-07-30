@@ -130,9 +130,9 @@ dmypy.json
 
 # Database Files
 
-database_raw/
+database_raw/*
 
-df_csv/
+df_csv/*
 
 # VSCode Workspace
 *.code-workspace
